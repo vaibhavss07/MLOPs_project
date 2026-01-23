@@ -25,3 +25,5 @@ python-multipart
 python-dotenv
 mlflow
 datetime
+imbalanced-learn
+optuna
