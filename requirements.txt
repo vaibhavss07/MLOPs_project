@@ -9,9 +9,9 @@ scikit-learn
 imblearn
 xgboost
 catboost
-pymongo
+pymongo==4.3.3
 from_root
-evidently==0.2.8
+evidently==0.7.20
 dill
 PyYAML
 neuro_mf

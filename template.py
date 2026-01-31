@@ -7,6 +7,7 @@ logging.basicConfig(level=logging.INFO)
 
 list_of_files=[
     "src/__init__.py",
+    "src/notebooks/.gitkeep",
     "src/components/__init__.py",
     "src/components/data_ingestion.py",
     "src/components/data_validation.py",
@@ -20,6 +21,7 @@ list_of_files=[
     "src/exception.py",
     "src/logger.py",
     "src/utils.py",
+    "src/config.py",
     "app.py",
     "Dockerfile",
     "requirements.txt",
