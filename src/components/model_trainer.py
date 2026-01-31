@@ -70,6 +70,12 @@ import mlflow
 import mlflow.sklearn
 from mlflow.models.signature import infer_signature
 
+# ===================== Dagshub =====================
+import dagshub
+dagshub.init(repo_owner='vaibhavsshinde1998', repo_name='MLOPs_project', mlflow=True)
+
+# remote server
+mlflow.set_tracking_uri("https://dagshub.com/vaibhavsshinde1998/MLOPs_project.mlflow")
 
 
 
@@ -392,7 +398,7 @@ class ModelTrainer:
             print(f"{'='*80}")
 
             # Start parent MLflow run for this model
-            with mlflow.start_run(run_name=model_name):
+            with mlflow.start_run(run_name=model_name, nested=True):
 
                 # Log model type
                 mlflow.set_tag("model_type", model_name)
@@ -541,7 +547,10 @@ class ModelTrainer:
             # ==================== EXECUTION ====================
 
             # Set MLflow experiment
-            mlflow.set_experiment("Visa_Approval_Model_Training")
+            mlflow.set_experiment("Visa_Approval_Model_Training_2")
+
+            # Kill any leftover active run from previous crash
+            mlflow.end_run()
 
             raw_data_df = pd.read_csv(raw_data)
 
@@ -561,43 +570,53 @@ class ModelTrainer:
                 stratify=y_encoded
             )
 
-            # Run optimization (adjust n_trials based on your time constraints)
-            results_df, best_models, studies = self.train_and_evaluate_models(
-                X_train, X_test, y_train, y_test,
-                n_trials=1,  # Reduce for faster testing, increase for better results
-                timeout=None  # Or set timeout in seconds, e.g., 300 for 5 minutes per model
-            )
 
-            # Save model comparison results
-            os.makedirs(os.path.dirname(self.model_trainer_config.model_comparison_results_dir), exist_ok=True)
-            results_df.to_csv(self.model_trainer_config.model_comparison_results_dir, index=False)
-            logging.info(fr"model_comparison_results.csv saved.")
+            # Start one top-level run for the entire session
+            with mlflow.start_run(run_name="Full_Training_Session"):
 
-            # Get best model
-            best_model_name = results_df.iloc[0]['Model']
-            best_model_pipeline = best_models[best_model_name]
+                    
+                # logging input data in mlflow
+                data = mlflow.data.from_pandas(raw_data_df.copy())
+                mlflow.log_input(data,"Input_data")
+                
 
-            logging.info(f"\n🏆 BEST MODEL: {best_model_name}")
-            
-            # Save best model
-            best_pipeline_path = self.model_trainer_config.best_pipeline_dir.format(best_model_name.replace(" ", "_"))
-            os.makedirs(os.path.dirname(best_pipeline_path), exist_ok=True)
-            joblib.dump(best_model_pipeline, best_pipeline_path)
+                # Run optimization (adjust n_trials based on your time constraints)
+                results_df, best_models, studies = self.train_and_evaluate_models(
+                    X_train, X_test, y_train, y_test,
+                    n_trials=1,  # Reduce for faster testing, increase for better results
+                    timeout=None  # Or set timeout in seconds, e.g., 300 for 5 minutes per model
+                )
 
-            # Save label encoder
-            os.makedirs(os.path.dirname(self.model_trainer_config.label_encoder_dir), exist_ok=True)
-            joblib.dump(label_encoder, self.model_trainer_config.label_encoder_dir)
+                # Save model comparison results
+                os.makedirs(os.path.dirname(self.model_trainer_config.model_comparison_results_dir), exist_ok=True)
+                results_df.to_csv(self.model_trainer_config.model_comparison_results_dir, index=False)
+                logging.info(fr"model_comparison_results.csv saved.")
 
-            logging.info(fr"\n✅ Best model and label encoder saved!")  
-    
-    
-            # Detailed classification report for best model
-            print("\n" + "="*80)
-            print(f"DETAILED CLASSIFICATION REPORT - {best_model_name}")
-            print("="*80)
-            y_test_pred = best_model_pipeline.predict(X_test)
-            print(classification_report(y_test, y_test_pred, 
-                                    target_names=label_encoder.classes_))
+                # Get best model
+                best_model_name = results_df.iloc[0]['Model']
+                best_model_pipeline = best_models[best_model_name]
+
+                logging.info(f"\n🏆 BEST MODEL: {best_model_name}")
+                
+                # Save best model
+                best_pipeline_path = self.model_trainer_config.best_pipeline_dir.format(best_model_name.replace(" ", "_"))
+                os.makedirs(os.path.dirname(best_pipeline_path), exist_ok=True)
+                joblib.dump(best_model_pipeline, best_pipeline_path)
+
+                # Save label encoder
+                os.makedirs(os.path.dirname(self.model_trainer_config.label_encoder_dir), exist_ok=True)
+                joblib.dump(label_encoder, self.model_trainer_config.label_encoder_dir)
+
+                logging.info(fr"\n✅ Best model and label encoder saved!")  
         
+        
+                # Detailed classification report for best model
+                print("\n" + "="*80)
+                print(f"DETAILED CLASSIFICATION REPORT - {best_model_name}")
+                print("="*80)
+                y_test_pred = best_model_pipeline.predict(X_test)
+                print(classification_report(y_test, y_test_pred, 
+                                        target_names=label_encoder.classes_))
+            
         except Exception as e:
             raise CustomException(e, sys)

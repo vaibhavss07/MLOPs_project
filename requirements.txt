@@ -24,6 +24,7 @@ jinja2
 python-multipart
 python-dotenv
 mlflow
+dagshub
 datetime
 imbalanced-learn
 optuna
