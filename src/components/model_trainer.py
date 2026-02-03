@@ -398,7 +398,7 @@ class ModelTrainer:
             print(f"{'='*80}")
 
             # Start parent MLflow run for this model
-            with mlflow.start_run(run_name=model_name, nested=True):
+            with mlflow.start_run(run_name=model_name, nested=True) as model_run:
 
                 # Log model type
                 mlflow.set_tag("model_type", model_name)
@@ -500,17 +500,22 @@ class ModelTrainer:
                 mlflow.log_metric("test_roc_auc", test_metrics['roc_auc'])
                 mlflow.log_metric("overfitting", train_metrics['roc_auc'] - test_metrics['roc_auc'])
                 
+            
+
                 # Log the model
                 signature = infer_signature(X_train, best_pipeline.predict(X_train))
+
                 mlflow.sklearn.log_model(
-                    best_pipeline, 
+                    best_pipeline,
                     f"{model_name.replace(' ', '_')}_pipeline",
                     signature=signature
                 )
+
             
                 # Store results
                 results.append({
                     'Model': model_name,
+                    'Run_ID': model_run.info.run_id,
                     'Best_CV_ROC_AUC': best_cv_score,
                     'Train_Accuracy': train_metrics['accuracy'],
                     'Train_F1': train_metrics['f1_score'],
@@ -547,7 +552,7 @@ class ModelTrainer:
             # ==================== EXECUTION ====================
 
             # Set MLflow experiment
-            mlflow.set_experiment("Visa_Approval_Model_Training_2")
+            mlflow.set_experiment("Visa_Approval_Model_Training_7")
 
             # Kill any leftover active run from previous crash
             mlflow.end_run()
@@ -583,7 +588,7 @@ class ModelTrainer:
                 # Run optimization (adjust n_trials based on your time constraints)
                 results_df, best_models, studies = self.train_and_evaluate_models(
                     X_train, X_test, y_train, y_test,
-                    n_trials=1,  # Reduce for faster testing, increase for better results
+                    n_trials=2,  # Reduce for faster testing, increase for better results
                     timeout=None  # Or set timeout in seconds, e.g., 300 for 5 minutes per model
                 )
 
@@ -595,8 +600,11 @@ class ModelTrainer:
                 # Get best model
                 best_model_name = results_df.iloc[0]['Model']
                 best_model_pipeline = best_models[best_model_name]
+                best_run_id = results_df.iloc[0]['Run_ID']
+
 
                 logging.info(f"\n🏆 BEST MODEL: {best_model_name}")
+
                 
                 # Save best model
                 best_pipeline_path = self.model_trainer_config.best_pipeline_dir.format(best_model_name.replace(" ", "_"))

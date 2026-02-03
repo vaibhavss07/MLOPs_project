@@ -43,6 +43,9 @@ from dataclasses import dataclass
 class FeatureEngineer(BaseEstimator, TransformerMixin):
     """Custom transformer for feature engineering"""
 
+    # Add this line for dagshub
+    __module__ = "src.components.data_transformation"
+
     def __init__(self):
         pass
             
@@ -67,6 +70,9 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
 
 class OutlierHandler(BaseEstimator, TransformerMixin):
     """Cap outliers using IQR method"""
+
+    # Add this line for dagshub
+    __module__ = "src.components.data_transformation"
     
     def __init__(self, method='cap', factor=1.5):
         self.method = method
@@ -103,6 +109,9 @@ class OutlierHandler(BaseEstimator, TransformerMixin):
 
 class CorrelationRemoverNumeric(BaseEstimator, TransformerMixin):
     """Remove highly correlated NUMERICAL features"""
+
+    # Add this line for dagshub
+    __module__ = "src.components.data_transformation"
     
     def __init__(self, threshold=0.9, numerical_cols=None):
         self.threshold = threshold
@@ -150,6 +159,9 @@ class CorrelationRemoverNumeric(BaseEstimator, TransformerMixin):
 
 class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
     """Dynamically adjust preprocessing based on remaining columns after correlation removal"""
+
+    # Add this line for dagshub
+    __module__ = "src.components.data_transformation"
     
     def __init__(self, numerical_cols, power_transform_cols, 
                  ordinal_cols, ordinal_categories, nominal_cols):
