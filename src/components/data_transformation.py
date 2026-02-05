@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
 from datetime import date
+from src.utils import load_config
 
 warnings.filterwarnings("ignore")
 pd.set_option("display.max_columns", None)
@@ -124,7 +125,12 @@ class CorrelationRemoverNumeric(BaseEstimator, TransformerMixin):
         
         # Select only numerical columns for correlation analysis
         if self.numerical_cols:
-            X_numeric = X_df[self.numerical_cols]
+
+            existing_numerical_cols = [col for col in self.numerical_cols 
+                                       if col in X_df.columns]
+            
+            X_numeric = X_df[existing_numerical_cols]
+        
         else:
             X_numeric = X_df.select_dtypes(include=[np.number])
         
@@ -174,27 +180,71 @@ class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
         
         self.remaining_numerical_cols = None
         self.remaining_power_cols = None
+        self.remaining_ordinal_cols = None
+        self.remaining_ordinal_categories = None
+        self.remaining_nominal_cols = None
         self.preprocessor = None
     
     def fit(self, X, y=None):
         X_df = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X
+
+        # Get all columns that actually exist in the data
+        existing_columns = set(X_df.columns)
         
         # Determine remaining numerical columns after correlation removal
         self.remaining_numerical_cols = [
             col for col in self.numerical_cols 
-            if col in X_df.columns and col not in self.power_transform_cols
+            if col in existing_columns and col not in self.power_transform_cols
         ]
         
         self.remaining_power_cols = [
             col for col in self.power_transform_cols 
-            if col in X_df.columns
+            if col in existing_columns
+        ]
+
+        # Filter ordinal columns to only those that exist
+        self.remaining_ordinal_cols = [
+            col for col in self.ordinal_cols 
+            if col in existing_columns
         ]
         
-        print(f"\nRemaining numerical cols (standard): {self.remaining_numerical_cols}")
-        print(f"Remaining power transform cols: {self.remaining_power_cols}")
-        print(f"Ordinal cols: {self.ordinal_cols}")
-        print(f"Nominal cols: {self.nominal_cols}")
+        # Filter ordinal categories to match remaining ordinal columns
+        self.remaining_ordinal_categories = [
+            self.ordinal_categories[i] 
+            for i, col in enumerate(self.ordinal_cols) 
+            if col in existing_columns
+        ]
         
+        # Filter nominal columns to only those that exist
+        self.remaining_nominal_cols = [
+            col for col in self.nominal_cols 
+            if col in existing_columns
+        ]
+        
+        print(f"\n{'='*60}")
+        print(f"DynamicColumnTransformer - Column Status")
+        print(f"{'='*60}")
+        print(f"Remaining numerical cols (standard): {self.remaining_numerical_cols}")
+        print(f"Remaining power transform cols: {self.remaining_power_cols}")
+        print(f"Remaining ordinal cols: {self.remaining_ordinal_cols}")
+        print(f"Remaining nominal cols: {self.remaining_nominal_cols}")
+        
+        # Warning messages for dropped columns
+        dropped_numerical = set(self.numerical_cols) - set(self.remaining_numerical_cols) - set(self.remaining_power_cols)
+        dropped_ordinal = set(self.ordinal_cols) - set(self.remaining_ordinal_cols)
+        dropped_nominal = set(self.nominal_cols) - set(self.remaining_nominal_cols)
+        
+        if dropped_numerical:
+            print(f"\n⚠️  Dropped numerical columns: {list(dropped_numerical)}")
+        if dropped_ordinal:
+            print(f"⚠️  Dropped ordinal columns: {list(dropped_ordinal)}")
+        if dropped_nominal:
+            print(f"⚠️  Dropped nominal columns: {list(dropped_nominal)}")
+        print(f"{'='*60}\n")
+        
+
+        # ==================== BUILD TRANSFORMERS ====================
+
         # Build transformers list
         transformers = []
         
@@ -215,20 +265,22 @@ class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
             ])
             transformers.append(('power', power_pipeline, self.remaining_power_cols))
         
+        
         # Ordinal categorical features
-        if self.ordinal_cols:
+        if self.remaining_ordinal_cols:
             ordinal_pipeline = Pipeline([
                 ('imputer', SimpleImputer(strategy='most_frequent')),
                 ('ordinal_encoder', OrdinalEncoder(
-                    categories=self.ordinal_categories,
+                    categories=self.remaining_ordinal_categories,
                     handle_unknown='use_encoded_value',
                     unknown_value=-1  # Assign -1 to unknown categories during inference
                 ))
             ])
-            transformers.append(('ordinal', ordinal_pipeline, self.ordinal_cols))
+            transformers.append(('ordinal', ordinal_pipeline, self.remaining_ordinal_cols))
         
+
         # Nominal categorical features
-        if self.nominal_cols:
+        if self.remaining_nominal_cols:
             nominal_pipeline = Pipeline([
                 ('imputer', SimpleImputer(strategy='most_frequent')),
                 ('onehot_encoder', OneHotEncoder(
@@ -237,8 +289,16 @@ class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
                     handle_unknown='ignore'  # Ignore unknown categories during inference
                 ))
             ])
-            transformers.append(('nominal', nominal_pipeline, self.nominal_cols))
+            transformers.append(('nominal', nominal_pipeline, self.remaining_nominal_cols))
         
+        # Check if we have any transformers
+        if not transformers:
+            raise ValueError(
+                "No columns remain after filtering! "
+                "All specified columns have been dropped by upstream transformers."
+            )
+        
+
         # Create ColumnTransformer
         self.preprocessor = ColumnTransformer(
             transformers=transformers,
@@ -268,23 +328,35 @@ class DataTransformation:
         try:
             # ==================== DEFINE YOUR COLUMNS ====================
 
-            numerical_cols = ['no_of_employees', 'prevailing_wage', 'company_age']
-            categorical_cols = ['continent', 'education_of_employee', 'has_job_experience', 'requires_job_training', 'region_of_employment', 'unit_of_wage', 'full_time_position', 'case_status']
+            # Load configuration
+            config = load_config(DATA_SCHEMA)
+            
+            # Access parameters exactly as in your original code
+            #all_columns = config['columns']
+            numerical_cols = config['numerical_cols']
+            categorical_cols = config['categorical_cols']
+            power_transform_cols = config['power_transform_cols']
+            ordinal_columns = config['ordinal_columns']
+            ordinal_categories = config['ordinal_categories']
+            nominal_columns = config['nominal_columns']
+
+            #numerical_cols = ['no_of_employees', 'prevailing_wage', 'company_age']
+            #categorical_cols = ['continent', 'education_of_employee', 'has_job_experience', 'requires_job_training', 'region_of_employment', 'unit_of_wage', 'full_time_position', 'case_status']
             
             # Columns that need power transformation to handle skewness.
-            power_transform_cols = ['company_age', 'no_of_employees']
+            #power_transform_cols = ['company_age', 'no_of_employees']
 
             # Ordinal categorical columns
-            ordinal_columns = ['education_of_employee']
+            #ordinal_columns = ['education_of_employee']
 
             # Define the order for ordinal categories (VERY IMPORTANT!)
-            ordinal_categories = [
-                ['High School', "Master's", "Bachelor's", 'Doctorate']   # education_of_employee
-                # Adjust these based on your actual data values and their logical order
-            ]
+            # ordinal_categories = [
+            #     ['High School', "Master's", "Bachelor's", 'Doctorate']   # education_of_employee
+            #     # Adjust these based on your actual data values and their logical order
+            # ]
 
             # Nominal categorical columns
-            nominal_columns = ['continent', 'has_job_experience', 'requires_job_training', 'region_of_employment', 'unit_of_wage', 'full_time_position']
+            #nominal_columns = ['continent', 'has_job_experience', 'requires_job_training', 'region_of_employment', 'unit_of_wage', 'full_time_position']
 
             
             

@@ -7,7 +7,6 @@ logging.basicConfig(level=logging.INFO)
 
 list_of_files=[
     "src/__init__.py",
-    "src/notebooks/.gitkeep",
     "src/components/__init__.py",
     "src/components/data_ingestion.py",
     "src/components/data_validation.py",
@@ -18,16 +17,18 @@ list_of_files=[
     "src/pipelines/__init__.py",
     "src/pipelines/training_pipeline.py",
     "src/pipelines/prediction_pipeline.py",
-    "src/exception.py",
-    "src/logger.py",
+    "src/exception/__init__.py",
+    "src/logger/__init__.py",
     "src/utils.py",
     "src/config.py",
     "app.py",
     "Dockerfile",
-    "requirements.txt",
     "setup.py",
+    "pyproject.toml",
+    "requirements.txt",
     "logs/.gitkeep",
     "artifacts/.gitkeep",
+    "notebooks/.gitkeep",
     ".env"
 ]
 

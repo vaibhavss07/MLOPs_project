@@ -1,0 +1,59 @@
+# Column definitions with data types
+columns:
+  case_id: category
+  continent: category
+  education_of_employee: category
+  has_job_experience: category
+  requires_job_training: category
+  no_of_employees: int
+  yr_of_estab: int
+  region_of_employment: category
+  prevailing_wage: float
+  unit_of_wage: category
+  full_time_position: category
+  case_status: category
+
+# Numerical columns 
+numerical_cols:
+  - no_of_employees
+  - prevailing_wage
+  - company_age
+
+# Categorical columns
+categorical_cols:
+  - continent
+  - education_of_employee
+  - has_job_experience
+  - requires_job_training
+  - region_of_employment
+  - unit_of_wage
+  - full_time_position
+  - case_status
+
+# Columns requiring power transformation (to handle skewness)
+power_transform_cols:
+  - company_age
+  - no_of_employees
+
+# Ordinal categorical columns (order matters)
+ordinal_columns:
+  - education_of_employee
+  
+
+# Ordinal categories with their order
+ordinal_categories:
+  education_of_employee:
+    - High School
+    - Master's
+    - Bachelor's
+    - Doctorate
+
+
+# Nominal categorical columns (order doesn't matter)
+nominal_columns:
+  - continent
+  - has_job_experience
+  - requires_job_training
+  - region_of_employment
+  - unit_of_wage
+  - full_time_position

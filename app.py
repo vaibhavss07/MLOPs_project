@@ -16,7 +16,7 @@ if __name__=="__main__":
         # Feature engg and transformation pipeline creation
         data_transformation = DataTransformation()
 
-        # Hyperparameter tuning and finding best model best pipeline
+        # # Hyperparameter tuning and finding best model best pipeline
         model_trainer = ModelTrainer()
         model_trainer.initiate_model_trainer(raw_data_path)
 

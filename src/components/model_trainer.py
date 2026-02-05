@@ -588,7 +588,7 @@ class ModelTrainer:
                 # Run optimization (adjust n_trials based on your time constraints)
                 results_df, best_models, studies = self.train_and_evaluate_models(
                     X_train, X_test, y_train, y_test,
-                    n_trials=2,  # Reduce for faster testing, increase for better results
+                    n_trials=1,  # Reduce for faster testing, increase for better results
                     timeout=None  # Or set timeout in seconds, e.g., 300 for 5 minutes per model
                 )
 
