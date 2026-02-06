@@ -36,7 +36,7 @@ def load_config(config_path='config.yaml'):
         with open(config_path, 'r') as file:
             config = yaml.safe_load(file)
         
-        # Extract parameters
+        # after FE
         numerical_cols = config['numerical_cols']
         categorical_cols = config['categorical_cols']
         power_transform_cols = config['power_transform_cols']
@@ -49,6 +49,8 @@ def load_config(config_path='config.yaml'):
         
         return {
             'columns': config['columns'],
+            'og_numerical_cols': config['og_numerical_cols'],
+            'og_categorical_cols': config['og_categorical_cols'],
             'numerical_cols': numerical_cols,
             'categorical_cols': categorical_cols,
             'power_transform_cols': power_transform_cols,

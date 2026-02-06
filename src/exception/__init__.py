@@ -7,8 +7,8 @@ def error_message_detail(error: Exception, error_detail: sys):
     file_name=exc_tb.tb_frame.f_code.co_filename
     line_no = exc_tb.tb_lineno
 
-    error_message="Error occured in python script name: [{file_name}] at line number [{line_no}] error message: {0}".format(str(error))
-
+    error_message=f"Error occured in python script name: [{file_name}] at line number [{line_no}] error message: {str(error)}" 
+    
     # Log the error for better tracking
     logging.error(error_message)
 

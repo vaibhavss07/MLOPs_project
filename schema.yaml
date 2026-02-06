@@ -13,6 +13,24 @@ columns:
   full_time_position: category
   case_status: category
 
+og_numerical_cols:
+  - no_of_employees
+  - yr_of_estab
+  - prevailing_wage
+
+og_categorical_cols:
+  - case_id
+  - continent
+  - education_of_employee
+  - has_job_experience
+  - requires_job_training
+  - region_of_employment
+  - unit_of_wage
+  - full_time_position
+  - case_status
+
+
+# ============================== Data Transformation - after FE ================================================
 # Numerical columns 
 numerical_cols:
   - no_of_employees

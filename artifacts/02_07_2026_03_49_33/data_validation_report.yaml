@@ -1,0 +1,4 @@
+{
+    "validation_status": false,
+    "message": "Missing numerical column: ['company_age'] in raw data."
+}
