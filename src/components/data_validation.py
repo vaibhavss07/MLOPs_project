@@ -81,7 +81,11 @@ class DataValidation:
 
             logging.info("Data validation artifact created and saved to JSON file.")
             
-            return validation_status, validation_error_msg, validation_report_file_path
+            
+            if not validation_status:
+                raise Exception(validation_error_msg)
+        
+            return validation_report_file_path
         
         except Exception as e:
             raise CustomException(e, sys) 

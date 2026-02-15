@@ -9,30 +9,19 @@ from sklearn.model_selection import train_test_split
 from src.logger import logging
 from src.exception import CustomException
 from src.config import *
-#import ssl
+from src.connections.mongo_db_connection import DBConnection
+
 
 
 class DataIngestion:
     def __init__(self):
         self.ingestion_config=DataIngestionConfig()
+        self.db = DBConnection()
     
     def initiate_data_ingestion(self):
         try:
-            # reading data from DB
-            client = pymongo.MongoClient(CONNECTION_URL, 
-                                        tls=True,
-                                        tlsAllowInvalidCertificates=True,
-                                        serverSelectionTimeoutMS=30000)
-            
-            data_base = client[DB_NAME]
-            collection = data_base[COLLECTION_NAME]
-
-            df = pd.DataFrame(list(collection.find()))
-
-            if "_id" in df.columns.to_list():
-                df = df.drop(columns=["_id"], axis=1)
-
-            df.replace({"na":np.nan},inplace=True)
+            # reading data from DB                                   
+            df = self.db.get_data()
             
             logging.info("Data reading completed from database")
 

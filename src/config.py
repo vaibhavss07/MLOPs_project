@@ -9,7 +9,24 @@ CONNECTION_URL =  os.getenv("connection_url")
 DB_NAME =  os.getenv("db_name")
 COLLECTION_NAME =  os.getenv("collection_name")
 
+# raw data schema
 DATA_SCHEMA = "schema.yaml"
+
+# dagshub constants
+REPO_OWNER=os.getenv("repo_owner")
+REPO_NAME=os.getenv("repo_name")
+REMOTE_SERVER = os.getenv("remote_server")
+
+# AWS constants
+AWS_ACCESS_KEY = os.getenv("aws_access_key")
+AWS_SECRET_ACCESS_KEY = os.getenv("aws_secret_access_key")
+REGION_NAME = "us-east-1"
+
+# MODEL Evaluation related constants
+MODEL_EVALUATION_CHANGED_THRESHOLD_SCORE: float = 0.02
+MODEL_BUCKET_NAME = "vs-model-mlopsproj"
+MODEL_PUSHER_S3_KEY = "model-registry"
+
 
 TIMESTAMP: str = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
 

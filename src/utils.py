@@ -78,12 +78,15 @@ def evaluate_clf(true, predicted, predicted_proba=None):
         else:
             roc_auc = roc_auc_score(true, predicted)
         
+        gini = 2 * roc_auc - 1  # Gini = 2 * AUC - 1
+        
         return {
             'accuracy': acc,
             'f1_score': f1,
             'precision': precision,
             'recall': recall,
-            'roc_auc': roc_auc
+            'roc_auc': roc_auc,
+            'gini': gini
         }
     
     except Exception as e:

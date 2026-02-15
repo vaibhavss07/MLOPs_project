@@ -72,10 +72,10 @@ from mlflow.models.signature import infer_signature
 
 # ===================== Dagshub =====================
 import dagshub
-dagshub.init(repo_owner='vaibhavsshinde1998', repo_name='MLOPs_project', mlflow=True)
+dagshub.init(repo_owner=REPO_OWNER, repo_name=REPO_NAME, mlflow=True)
 
 # remote server
-mlflow.set_tracking_uri("https://dagshub.com/vaibhavsshinde1998/MLOPs_project.mlflow")
+mlflow.set_tracking_uri(REMOTE_SERVER)
 
 
 

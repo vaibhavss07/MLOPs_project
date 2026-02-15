@@ -10,18 +10,18 @@ import sys
 if __name__=="__main__":
 
     try:
-        # Fetching data from DB and writing in raw_data.csv
+        #========================== Fetching data from DB and writing in raw_data.csv ===================================
         data_ingestion = DataIngestion()
         raw_data_path = data_ingestion.initiate_data_ingestion()
 
-        # Data validation
+        #========================== Data validation ======================================================================
         data_validation = DataValidation(raw_data_path)
-        validation_status, validation_error_msg, validation_report_file_path = data_validation.initiate_data_validation()
-
-        # Feature engg and transformation pipeline creation
+        validation_report_file_path = data_validation.initiate_data_validation()
+        
+        #========================== Feature engg and transformation pipeline creation ====================================
         data_transformation = DataTransformation()
 
-        # # Hyperparameter tuning and finding best model best pipeline
+        #========================== Hyperparameter tuning and finding best model best pipeline ===========================
         model_trainer = ModelTrainer()
         model_trainer.initiate_model_trainer(raw_data_path)
 
