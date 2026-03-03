@@ -28,4 +28,5 @@ dagshub
 datetime
 imbalanced-learn
 optuna
+shap
 # -e .

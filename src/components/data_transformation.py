@@ -4,6 +4,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
+import json
 from datetime import date
 from src.utils import load_config
 
@@ -58,8 +59,7 @@ class FeatureEngineer(BaseEstimator, TransformerMixin):
 
         # Calculate company age
         from datetime import date
-        todays_date = date.today()
-        current_year = todays_date.year
+        current_year = date.today().year
 
         X['company_age'] = current_year - X['yr_of_estab']
                 
@@ -152,8 +152,8 @@ class CorrelationRemoverNumeric(BaseEstimator, TransformerMixin):
         self.columns_to_keep = [col for col in X_df.columns 
                                 if col not in self.columns_to_drop]
         
-        if self.columns_to_drop:
-            print(f"Dropping correlated columns: {self.columns_to_drop}")
+        if self.columns_to_drop: 
+            logging.info(f"CorrelationRemover — dropping: {self.columns_to_drop}")
         
         return self
     
@@ -221,13 +221,14 @@ class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
             if col in existing_columns
         ]
         
-        print(f"\n{'='*60}")
-        print(f"DynamicColumnTransformer - Column Status")
-        print(f"{'='*60}")
-        print(f"Remaining numerical cols (standard): {self.remaining_numerical_cols}")
-        print(f"Remaining power transform cols: {self.remaining_power_cols}")
-        print(f"Remaining ordinal cols: {self.remaining_ordinal_cols}")
-        print(f"Remaining nominal cols: {self.remaining_nominal_cols}")
+
+        # ── Diagnostics ──────────────────────────────────────────────
+        logging.info("DynamicColumnTransformer column status:")
+        logging.info(f"  Remaining numerical cols (standard): {self.remaining_numerical_cols}")
+        logging.info(f"  Remaining power transform cols: {self.remaining_power_cols}")
+        logging.info(f"  Remaining ordinal cols: {self.remaining_ordinal_cols}")
+        logging.info(f"  Remaining nominal cols: {self.remaining_nominal_cols}")
+
         
         # Warning messages for dropped columns
         dropped_numerical = set(self.numerical_cols) - set(self.remaining_numerical_cols) - set(self.remaining_power_cols)
@@ -235,13 +236,11 @@ class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
         dropped_nominal = set(self.nominal_cols) - set(self.remaining_nominal_cols)
         
         if dropped_numerical:
-            print(f"\n⚠️  Dropped numerical columns: {list(dropped_numerical)}")
+            logging.warning(f"  Dropped numerical cols  : {list(dropped_numerical)}")
         if dropped_ordinal:
-            print(f"⚠️  Dropped ordinal columns: {list(dropped_ordinal)}")
+            logging.warning(f"  Dropped ordinal cols    : {list(dropped_ordinal)}")
         if dropped_nominal:
-            print(f"⚠️  Dropped nominal columns: {list(dropped_nominal)}")
-        print(f"{'='*60}\n")
-        
+            logging.warning(f"  Dropped nominal cols    : {list(dropped_nominal)}")
 
         # ==================== BUILD TRANSFORMERS ====================
 
@@ -312,6 +311,10 @@ class DynamicColumnTransformer(BaseEstimator, TransformerMixin):
         X_df = pd.DataFrame(X) if not isinstance(X, pd.DataFrame) else X
         return self.preprocessor.transform(X_df)
 
+    def get_feature_names_out(self):
+        """Return feature names after all encoding — used by SHAP explainer."""
+        return self.preprocessor.get_feature_names_out()
+    
 
 class DataTransformation:
 
@@ -319,11 +322,8 @@ class DataTransformation:
         self.data_transformation_config = DataTransformationConfig()
         
 
-
-    def create_pipeline(self, model):
+    def build_preprocessing_pipeline(self) -> Pipeline:
         # ==================== Pipeline function ========================================
-
-        """Create preprocessing + SMOTE + model pipeline"""
 
         try:
             # ==================== DEFINE YOUR COLUMNS ====================
@@ -361,7 +361,7 @@ class DataTransformation:
             
             
             
-            pipeline = ImbPipeline([
+            preprocessing_pipeline = Pipeline([
                 ('feature_engineer', FeatureEngineer()),
                 ('outlier_handler', OutlierHandler(method='cap', factor=1.5)),
                 ('correlation_remover', CorrelationRemoverNumeric(
@@ -374,21 +374,62 @@ class DataTransformation:
                     ordinal_cols=ordinal_columns,
                     ordinal_categories=ordinal_categories,
                     nominal_cols=nominal_columns
-                )),
-                ('smote', SMOTE(
-                    sampling_strategy='auto',
-                    random_state=42,
-                    k_neighbors=5
-                )),
-                ('model', model)
+                ))
             ])
 
             
-            return pipeline
+            return preprocessing_pipeline
 
         except Exception as e:
             raise CustomException(e, sys)
 
+
+    def initiate_data_transformation(self, X_train, X_test, y_train):
+        """
+        Fit preprocessing pipeline on X_train, transform both splits.
+        Saves the fitted pipeline to disk as a reusable artifact.
+        """
+        try:
+            logging.info("Building and fitting preprocessing pipeline.")
+
+            preprocessing_pipeline = self.build_preprocessing_pipeline()
+
+            # Fit ONLY on training data — no leakage
+            X_train_transformed = preprocessing_pipeline.fit_transform(X_train, y_train)
+            X_test_transformed  = preprocessing_pipeline.transform(X_test)
+
+            # Extract feature names for SHAP and analysis
+            feature_names = list(
+                preprocessing_pipeline.named_steps['preprocessor'].get_feature_names_out()
+            )
+
+            logging.info(
+                f"Transformation complete. "
+                f"Train shape: {X_train_transformed.shape} | "
+                f"Test shape: {X_test_transformed.shape} | "
+                f"Features: {len(feature_names)}"
+            )
+
+            # Persist fitted pipeline as artifact
+            os.makedirs(os.path.dirname(self.data_transformation_config.preprocessing_pipeline_dir), exist_ok=True)
+
+
+            with open(self.data_transformation_config.X_train_transformed_dir, 'wb') as file_obj:
+                np.save(file_obj, X_train_transformed)
+            
+            with open(self.data_transformation_config.X_test_transformed_dir, 'wb') as file_obj:
+                np.save(file_obj, X_test_transformed)
+
+            with open(self.data_transformation_config.feature_names_dir, 'w') as file_obj:
+                json.dump(feature_names, file_obj)
+
+            joblib.dump(preprocessing_pipeline, self.data_transformation_config.preprocessing_pipeline_dir)
+            logging.info(f"Preprocessing pipeline saved")
+
+            return X_train_transformed, X_test_transformed, feature_names, preprocessing_pipeline
+
+        except Exception as e:
+            raise CustomException(e, sys)
 
 
 

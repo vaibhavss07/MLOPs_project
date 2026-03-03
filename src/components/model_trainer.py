@@ -61,7 +61,7 @@ from src.config import *
 import os
 import sys
 from dataclasses import dataclass
-
+from src.components.explainability import SHAPExplainer
 from src.utils import evaluate_clf
 from src.components.data_transformation import DataTransformation
 
@@ -78,8 +78,16 @@ dagshub.init(repo_owner=REPO_OWNER, repo_name=REPO_NAME, mlflow=True)
 mlflow.set_tracking_uri(REMOTE_SERVER)
 
 
+# ==================== HELPER — imbalance ratio ====================
+
+def _pos_weight(y_train: np.ndarray) -> float:
+    """scale_pos_weight for XGBoost: count(neg) / count(pos)."""
+    neg = (y_train == 0).sum()
+    pos = (y_train == 1).sum()
+    return float(neg / pos) if pos > 0 else 1.0
 
 
+# ==================== MODEL TRAINER ====================
 
 class ModelTrainer:
     def __init__(self):
@@ -87,6 +95,15 @@ class ModelTrainer:
         self.data_transformation = DataTransformation()
 
     # ==================== OPTUNA OBJECTIVE FUNCTIONS ====================
+
+    def _cv_score(self, model, X_train, y_train) -> float:
+        """Shared cross-validation logic for all objectives."""
+        scores = cross_val_score(
+            model, X_train, y_train,
+            cv=3, scoring='roc_auc', n_jobs=-1
+        )
+        return scores.mean(), scores.std()
+    
 
     def objective_random_forest(self, trial, X_train, y_train):
         """Optuna objective for Random Forest"""
@@ -98,23 +115,19 @@ class ModelTrainer:
             'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 5),
             'max_features': trial.suggest_categorical('max_features', ['sqrt', 'log2']),
             'bootstrap': trial.suggest_categorical('bootstrap', [True, False]),
-            'random_state': 42
+            'class_weight':     'balanced',   # ← imbalance handled here
+            'random_state':     42,
+            'n_jobs':           -1,
         }
         
         model = RandomForestClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        # Use cross-validation for robust evaluation
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train)
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
             mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_decision_tree(self, trial, X_train, y_train):
@@ -126,22 +139,18 @@ class ModelTrainer:
             'min_samples_split': trial.suggest_int('min_samples_split', 2, 20),
             'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 10),
             'max_features': trial.suggest_categorical('max_features', [None, 'sqrt', 'log2']),
+            'class_weight':     'balanced',
             'random_state': 42
         }
         
         model = DecisionTreeClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train)
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
             mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_gradient_boosting(self, trial, X_train, y_train):
@@ -157,18 +166,13 @@ class ModelTrainer:
         }
         
         model = GradientBoostingClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train)
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
             mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_logistic_regression(self, trial, X_train, y_train):
@@ -192,6 +196,7 @@ class ModelTrainer:
             'C': trial.suggest_float('C', 0.01, 100, log=True),
             'solver': solver,
             'max_iter': trial.suggest_int('max_iter', 1000, 3000),
+            'class_weight': 'balanced',
             'random_state': 42,
             'n_jobs': -1
         }
@@ -202,22 +207,16 @@ class ModelTrainer:
         
         try:
             model = LogisticRegression(**params)
-            pipeline = self.data_transformation.create_pipeline(model)
-            
-            cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                        cv=3, scoring='roc_auc', n_jobs=-1)
+            mean, std = self._cv_score(model, X_train, y_train)
             
             # Log to MLflow
             with mlflow.start_run(nested=True):
                 mlflow.log_params(params)
-                mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-                mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-            return cv_scores.mean()
+                mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+            return mean
         
         except Exception as e:
-            print(f"⚠️ Trial failed with parameters: {params}")
-            print(f"   Error: {e}")
+            logging.warning(f"LR trial failed: {e}")
             return 0.0
 
 
@@ -231,18 +230,13 @@ class ModelTrainer:
         }
         
         model = KNeighborsClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train)
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
             mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_xgboost(self, trial, X_train, y_train):
@@ -257,24 +251,19 @@ class ModelTrainer:
             'gamma': trial.suggest_float('gamma', 0, 0.3),
             'reg_alpha': trial.suggest_float('reg_alpha', 0, 1),
             'reg_lambda': trial.suggest_float('reg_lambda', 1, 2),
+            'scale_pos_weight': _pos_weight(y_train),   # ← imbalance handled here
             'random_state': 42,
-            'use_label_encoder': False,
             'eval_metric': 'logloss'
         }
         
         model = XGBClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train) 
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
-            mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_params(params) 
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_catboost(self, trial, X_train, y_train):
@@ -286,23 +275,19 @@ class ModelTrainer:
             'depth': trial.suggest_int('depth', 4, 10),
             'l2_leaf_reg': trial.suggest_int('l2_leaf_reg', 1, 7),
             'border_count': trial.suggest_categorical('border_count', [32, 64, 128]),
+            'auto_class_weights': 'Balanced',   # ← imbalance handled here
             'random_state': 42,
             'verbose': False
         }
         
         model = CatBoostClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train)
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
-            mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_params(params) 
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_svc(self, trial, X_train, y_train):
@@ -312,6 +297,7 @@ class ModelTrainer:
             'C': trial.suggest_float('C', 0.1, 100, log=True),
             'kernel': trial.suggest_categorical('kernel', ['linear', 'rbf', 'poly']),
             'gamma': trial.suggest_categorical('gamma', ['scale', 'auto']),
+            'class_weight': 'balanced',
             'random_state': 42,
             'probability': True  # Required for predict_proba
         }
@@ -320,18 +306,13 @@ class ModelTrainer:
             params['degree'] = trial.suggest_int('degree', 2, 4)
         
         model = SVC(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
-        
-        cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                    cv=3, scoring='roc_auc', n_jobs=-1)
+        mean, std = self._cv_score(model, X_train, y_train)
         
         # Log to MLflow
         with mlflow.start_run(nested=True):
-            mlflow.log_params(params)
-            mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-            mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-        return cv_scores.mean()
+            mlflow.log_params(params) 
+            mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+        return mean
 
 
     def objective_adaboost(self, trial, X_train, y_train):
@@ -344,287 +325,299 @@ class ModelTrainer:
             # algorithm defaults to 'SAMME' if not specified
         }
         
-        model = AdaBoostClassifier(**params)
-        pipeline = self.data_transformation.create_pipeline(model)
         
-        try:
-            cv_scores = cross_val_score(pipeline, X_train, y_train, 
-                                        cv=3, scoring='roc_auc', n_jobs=-1)
+        try:       
+            model = AdaBoostClassifier(**params)
+            mean, std = self._cv_score(model, X_train, y_train)  
             
             # Log to MLflow
             with mlflow.start_run(nested=True):
-                mlflow.log_params(params)
-                mlflow.log_metric("cv_roc_auc_mean", cv_scores.mean())
-                mlflow.log_metric("cv_roc_auc_std", cv_scores.std())
-
-            return cv_scores.mean()
+                mlflow.log_params(params) 
+                mlflow.log_metrics({'cv_roc_auc_mean': mean, 'cv_roc_auc_std': std})
+            return mean
         
         except Exception as e:
-            print(f"⚠️ AdaBoost trial failed: {e}")
+            logging.warning(f"AdaBoost trial failed: {e}")
             return 0.0
     
+
+    # ── Model objective registry ────────────────────────────────────────────────────
+
+    def _get_model_objectives(self):
+        return {
+            'Random Forest':             self.objective_random_forest,
+            'Decision Tree':             self.objective_decision_tree,
+            'Gradient Boosting':         self.objective_gradient_boosting,
+            'Logistic Regression':       self.objective_logistic_regression,
+            'K-Neighbors Classifier':    self.objective_knn,
+            'XGBoost':                   self.objective_xgboost,
+            'CatBoost':                  self.objective_catboost,
+            'Support Vector Classifier': self.objective_svc,
+            'AdaBoost':                  self.objective_adaboost,
+        }
    
     # ==================== MAIN TRAINING FUNCTION ====================
             
 
-    def train_and_evaluate_models(self, X_train, X_test, y_train, y_test, n_trials=50, timeout=None):
-        '''
-        Gives every models (best param version) metrics, pipeline, study.
-        '''
-        # Define models and their objective functions
-        model_objectives = {
-            'Random Forest': self.objective_random_forest,
-            'Decision Tree': self.objective_decision_tree,
-            'Gradient Boosting': self.objective_gradient_boosting,
-            'Logistic Regression': self.objective_logistic_regression,
-            'K-Neighbors Classifier': self.objective_knn,
-            'XGBoost': self.objective_xgboost,
-            'CatBoost': self.objective_catboost,
-            'Support Vector Classifier': self.objective_svc,
-            'AdaBoost': self.objective_adaboost
-        }
-        
-        results = []
-        best_models = {}
-        studies = {}
-        
-        print("="*80)
-        print("STARTING HYPERPARAMETER OPTIMIZATION WITH OPTUNA")
-        print("="*80)
-        
+    def _build_final_model(self, model_name: str, best_params: dict, y_train: np.ndarray):
+        """Reconstruct final model from Optuna best params with clean param names."""
+
+        if model_name == 'Random Forest':
+            return RandomForestClassifier(**best_params)
+
+        elif model_name == 'Decision Tree':
+            return DecisionTreeClassifier(**best_params)
+
+        elif model_name == 'Gradient Boosting':
+            return GradientBoostingClassifier(**best_params)
+
+        elif model_name == 'Logistic Regression':
+            clean = {}
+            for k, v in best_params.items():
+                clean['solver' if k.startswith('solver_') else k] = v
+            penalty = clean.get('penalty')
+            if penalty == 'l1' and clean.get('solver') not in ['saga', 'liblinear']:
+                clean['solver'] = 'saga'
+            elif penalty == 'elasticnet':
+                clean['solver'] = 'saga'
+            clean['n_jobs'] = -1
+            return LogisticRegression(**clean)
+
+        elif model_name == 'K-Neighbors Classifier':
+            return KNeighborsClassifier(**best_params)
+
+        elif model_name == 'XGBoost':
+            best_params['scale_pos_weight'] = _pos_weight(y_train)
+            return XGBClassifier(**best_params)
+
+        elif model_name == 'CatBoost':
+            return CatBoostClassifier(**best_params)
+
+        elif model_name == 'Support Vector Classifier':
+            best_params['probability'] = True
+            return SVC(**best_params)
+
+        elif model_name == 'AdaBoost':
+            return AdaBoostClassifier(**best_params)
+
+    # ── Core training loop ────────────────────────────────────────────────
+
+    def train_and_evaluate_models(
+        self,
+        X_train, X_test, y_train, y_test,
+        n_trials=50, timeout=None
+    ):
+        """
+        Runs Optuna search for every model.
+        Models are trained directly on pre-transformed numpy arrays.
+        No pipeline creation here — preprocessing already done.
+
+        Returns
+        -------
+        results_df   : DataFrame sorted by Test ROC AUC
+        best_models  : dict {model_name: fitted model}
+        studies      : dict {model_name: optuna.Study}
+        """
+        model_objectives = self._get_model_objectives()
+        results, best_models, studies = [], {}, {}
+
+        logging.info("=" * 80)
+        logging.info("STARTING HYPERPARAMETER OPTIMISATION")
+        logging.info("=" * 80)
+
         for model_name, objective_func in model_objectives.items():
-            print(f"\n{'='*80}")
-            print(f"Training: {model_name}")
-            print(f"{'='*80}")
+            logging.info(f"\nTraining: {model_name}")
 
-            # Start parent MLflow run for this model
             with mlflow.start_run(run_name=model_name, nested=True) as model_run:
-
-                # Log model type
                 mlflow.set_tag("model_type", model_name)
-            
-                # Create Optuna study
+
                 study = optuna.create_study(
-                    direction='maximize',  # Maximize ROC AUC
+                    direction='maximize',
                     sampler=TPESampler(seed=42),
-                    study_name=f'{model_name}_optimization'
+                    study_name=f'{model_name}_optimisation'
                 )
-            
-                # Optimize
+
                 study.optimize(
                     lambda trial: objective_func(trial, X_train, y_train),
                     n_trials=n_trials,
                     timeout=timeout,
                     show_progress_bar=True
                 )
-            
-                # Get best parameters
-                best_params = study.best_params
+
+                best_params   = study.best_params
                 best_cv_score = study.best_value
-                
-                print(f"\n✅ Best CV ROC AUC: {best_cv_score:.4f}")
-                print(f"Best Parameters: {best_params}")
-            
-                # Train final model with best parameters on full training data
-                if model_name == 'Random Forest':
-                    final_model = RandomForestClassifier(**best_params)
-                elif model_name == 'Decision Tree':
-                    final_model = DecisionTreeClassifier(**best_params)
-                elif model_name == 'Gradient Boosting':
-                    final_model = GradientBoostingClassifier(**best_params)
 
-                elif model_name == 'Logistic Regression':
-                    # Clean up parameter names (remove optuna suffixes like 'solver_l2')
-                    clean_params = {}
-                    for key, value in best_params.items():
-                        if key.startswith('solver_'):
-                            clean_params['solver'] = value
-                        else:
-                            clean_params[key] = value
-                    
-                    # Ensure compatibility
-                    penalty = clean_params.get('penalty')
-                    if penalty == 'l1' and clean_params.get('solver') not in ['saga', 'liblinear']:
-                        clean_params['solver'] = 'saga'
-                    elif penalty == 'elasticnet':
-                        clean_params['solver'] = 'saga'
-                    
-                    # Add n_jobs
-                    clean_params['n_jobs'] = -1
-                    
-                    final_model = LogisticRegression(**clean_params)
+                logging.info(f"Best CV ROC AUC : {best_cv_score:.4f}")
+                logging.info(f"Best params     : {best_params}")
 
-                elif model_name == 'K-Neighbors Classifier':
-                    final_model = KNeighborsClassifier(**best_params)
-                elif model_name == 'XGBoost':
-                    final_model = XGBClassifier(**best_params)
-                elif model_name == 'CatBoost':
-                    final_model = CatBoostClassifier(**best_params)
-                elif model_name == 'Support Vector Classifier':
-                    # Ensure probability=True for SVC
-                    best_params['probability'] = True
-                    final_model = SVC(**best_params)
-                elif model_name == 'AdaBoost':
-                    final_model = AdaBoostClassifier(**best_params)
-                
-                # Create pipeline with best model
-                best_pipeline = self.data_transformation.create_pipeline(final_model)
-                
-                # Train on full training set
-                best_pipeline.fit(X_train, y_train)
-            
-                # Evaluate on training set
-                y_train_pred = best_pipeline.predict(X_train)
-                y_train_proba = best_pipeline.predict_proba(X_train)[:, 1]
+                # Train final model on full training data
+                final_model = self._build_final_model(model_name, best_params.copy(), y_train)
+                final_model.fit(X_train, y_train)
+
+                # Evaluate
+                y_train_pred  = final_model.predict(X_train)
+                y_train_proba = final_model.predict_proba(X_train)[:, 1]
                 train_metrics = evaluate_clf(y_train, y_train_pred, y_train_proba)
-                
-                # Evaluate on test set
-                y_test_pred = best_pipeline.predict(X_test)
-                y_test_proba = best_pipeline.predict_proba(X_test)[:, 1]
+
+                y_test_pred  = final_model.predict(X_test)
+                y_test_proba = final_model.predict_proba(X_test)[:, 1]
                 test_metrics = evaluate_clf(y_test, y_test_pred, y_test_proba)
 
-                # Log best parameters to parent run
+                # Log to MLflow
                 mlflow.log_params(best_params)
-                
-                # Log all metrics to parent run
-                mlflow.log_metric("best_cv_roc_auc", best_cv_score)
-                mlflow.log_metric("train_accuracy", train_metrics['accuracy'])
-                mlflow.log_metric("train_f1", train_metrics['f1_score'])
-                mlflow.log_metric("train_precision", train_metrics['precision'])
-                mlflow.log_metric("train_recall", train_metrics['recall'])
-                mlflow.log_metric("train_roc_auc", train_metrics['roc_auc'])
-                mlflow.log_metric("test_accuracy", test_metrics['accuracy'])
-                mlflow.log_metric("test_f1", test_metrics['f1_score'])
-                mlflow.log_metric("test_precision", test_metrics['precision'])
-                mlflow.log_metric("test_recall", test_metrics['recall'])
-                mlflow.log_metric("test_roc_auc", test_metrics['roc_auc'])
-                mlflow.log_metric("overfitting", train_metrics['roc_auc'] - test_metrics['roc_auc'])
-                
-            
-
-                # Log the model
-                signature = infer_signature(X_train, best_pipeline.predict(X_train))
-
-                mlflow.sklearn.log_model(
-                    best_pipeline,
-                    f"{model_name.replace(' ', '_')}_pipeline",
-                    signature=signature
-                )
-
-            
-                # Store results
-                results.append({
-                    'Model': model_name,
-                    'Run_ID': model_run.info.run_id,
-                    'Best_CV_ROC_AUC': best_cv_score,
-                    'Train_Accuracy': train_metrics['accuracy'],
-                    'Train_F1': train_metrics['f1_score'],
-                    'Train_Precision': train_metrics['precision'],
-                    'Train_Recall': train_metrics['recall'],
-                    'Train_ROC_AUC': train_metrics['roc_auc'],
-                    'Test_Accuracy': test_metrics['accuracy'],
-                    'Test_F1': test_metrics['f1_score'],
-                    'Test_Precision': test_metrics['precision'],
-                    'Test_Recall': test_metrics['recall'],
-                    'Test_ROC_AUC': test_metrics['roc_auc'],
-                    'Overfitting': train_metrics['roc_auc'] - test_metrics['roc_auc']
+                mlflow.log_metrics({
+                    'best_cv_roc_auc':  best_cv_score,
+                    'train_accuracy':   train_metrics['accuracy'],
+                    'train_f1':         train_metrics['f1_score'],
+                    'train_precision':  train_metrics['precision'],
+                    'train_recall':     train_metrics['recall'],
+                    'train_roc_auc':    train_metrics['roc_auc'],
+                    'test_accuracy':    test_metrics['accuracy'],
+                    'test_f1':          test_metrics['f1_score'],
+                    'test_precision':   test_metrics['precision'],
+                    'test_recall':      test_metrics['recall'],
+                    'test_roc_auc':     test_metrics['roc_auc'],
+                    'overfitting':      train_metrics['roc_auc'] - test_metrics['roc_auc'],
                 })
-            
-                # Store best model and study
-                best_models[model_name] = best_pipeline
-                studies[model_name] = study
+
+                # Log model — signature uses raw transformed input
+                signature = infer_signature(X_train, final_model.predict(X_train))
+                mlflow.sklearn.log_model(
+                    final_model,
+                    f"{model_name.replace(' ', '_')}_model",
+                    signature=signature)
                 
-                print(f"\nTest Performance:")
-                print(f"  Accuracy: {test_metrics['accuracy']:.4f}")
-                print(f"  F1-Score: {test_metrics['f1_score']:.4f}")
-                print(f"  ROC AUC: {test_metrics['roc_auc']:.4f}")
-        
-        # Create results DataFrame
-        results_df = pd.DataFrame(results)
-        results_df = results_df.sort_values('Test_ROC_AUC', ascending=False).reset_index(drop=True)
-        
+
+                results.append({
+                    'Model':           model_name,
+                    'Run_ID':          model_run.info.run_id,
+                    'Best_CV_ROC_AUC': best_cv_score,
+                    'Train_Accuracy':  train_metrics['accuracy'],
+                    'Train_F1':        train_metrics['f1_score'],
+                    'Train_Precision': train_metrics['precision'],
+                    'Train_Recall':    train_metrics['recall'],
+                    'Train_ROC_AUC':   train_metrics['roc_auc'],
+                    'Test_Accuracy':   test_metrics['accuracy'],
+                    'Test_F1':         test_metrics['f1_score'],
+                    'Test_Precision':  test_metrics['precision'],
+                    'Test_Recall':     test_metrics['recall'],
+                    'Test_ROC_AUC':    test_metrics['roc_auc'],
+                    'Overfitting':     train_metrics['roc_auc'] - test_metrics['roc_auc'],
+                })
+
+                best_models[model_name] = final_model
+                studies[model_name]     = study
+
+                logging.info(
+                    f"Test → Accuracy: {test_metrics['accuracy']:.4f} | "
+                    f"F1: {test_metrics['f1_score']:.4f} | "
+                    f"ROC AUC: {test_metrics['roc_auc']:.4f}")
+
+        results_df = (pd.DataFrame(results).sort_values('Test_ROC_AUC', ascending=False).reset_index(drop=True))
         return results_df, best_models, studies
-    
+
+    # ── Entry point ───────────────────────────────────────────────────────
 
     def initiate_model_trainer(self, raw_data):
         try:
-    
-            # ==================== EXECUTION ====================
+            mlflow.set_experiment("Visa_Approval_Model_Training345")
+            mlflow.end_run()   # kill any leftover run from a crash
 
-            # Set MLflow experiment
-            mlflow.set_experiment("Visa_Approval_Model_Training_7")
-
-            # Kill any leftover active run from previous crash
-            mlflow.end_run()
-
+            # === making data ready ===========================================
             raw_data_df = pd.read_csv(raw_data)
 
-            # Prepare data
             X = raw_data_df.drop('case_status', axis=1)
             y = raw_data_df['case_status']
 
-            # Encode target
             label_encoder = LabelEncoder()
             y_encoded = label_encoder.fit_transform(y)
 
-            # Train-test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y_encoded, 
-                test_size=0.2, 
+            X_train_raw, X_test_raw, y_train, y_test = train_test_split(
+                X, y_encoded,
+                test_size=0.2,
                 random_state=42,
                 stratify=y_encoded
             )
 
+            # ── Step 1: Preprocessing ─────────────────────────────────
+            # Fit on train, transform both splits.
+            # X_train_transformed is the clean original training data —
+            # used both for model training and as SHAP background.
+            (
+                X_train_transformed,
+                X_test_transformed,
+                feature_names,
+                preprocessing_pipeline
+            ) = self.data_transformation.initiate_data_transformation(X_train_raw, X_test_raw, y_train)
 
-            # Start one top-level run for the entire session
             with mlflow.start_run(run_name="Full_Training_Session"):
 
-                    
-                # logging input data in mlflow
                 data = mlflow.data.from_pandas(raw_data_df.copy())
-                mlflow.log_input(data,"Input_data")
-                
+                mlflow.log_input(data, "Input_data")
 
-                # Run optimization (adjust n_trials based on your time constraints)
+                # ── Step 2: Train all models ──────────────────────────
                 results_df, best_models, studies = self.train_and_evaluate_models(
-                    X_train, X_test, y_train, y_test,
-                    n_trials=1,  # Reduce for faster testing, increase for better results
-                    timeout=None  # Or set timeout in seconds, e.g., 300 for 5 minutes per model
-                )
+                    X_train_transformed, X_test_transformed,
+                    y_train, y_test,
+                    n_trials=1,
+                    timeout=None)
 
-                # Save model comparison results
+                # Save comparison csv
                 os.makedirs(os.path.dirname(self.model_trainer_config.model_comparison_results_dir), exist_ok=True)
                 results_df.to_csv(self.model_trainer_config.model_comparison_results_dir, index=False)
-                logging.info(fr"model_comparison_results.csv saved.")
+                logging.info("model_comparison_results.csv saved.")
 
-                # Get best model
-                best_model_name = results_df.iloc[0]['Model']
-                best_model_pipeline = best_models[best_model_name]
-                best_run_id = results_df.iloc[0]['Run_ID']
+                # ── Step 3: Identify best model ───────────────────────
+                best_model_name  = results_df.iloc[0]['Model']
+                best_model       = best_models[best_model_name]
+                logging.info(f"BEST MODEL: {best_model_name}")
 
+                # ── Step 4: Save artifacts ────────────────────────────
+                # saving best model
+                best_model_path = self.model_trainer_config.best_pipeline_dir.format(best_model_name.replace(" ", "_"))
+                os.makedirs(os.path.dirname(best_model_path), exist_ok=True)
+                joblib.dump(best_model, best_model_path)
 
-                logging.info(f"\n🏆 BEST MODEL: {best_model_name}")
-
-                
-                # Save best model
-                best_pipeline_path = self.model_trainer_config.best_pipeline_dir.format(best_model_name.replace(" ", "_"))
-                os.makedirs(os.path.dirname(best_pipeline_path), exist_ok=True)
-                joblib.dump(best_model_pipeline, best_pipeline_path)
-
-                # Save label encoder
+                # saving label encoder
                 os.makedirs(os.path.dirname(self.model_trainer_config.label_encoder_dir), exist_ok=True)
                 joblib.dump(label_encoder, self.model_trainer_config.label_encoder_dir)
+                logging.info("Best model and label encoder saved.")
 
-                logging.info(fr"\n✅ Best model and label encoder saved!")  
-        
-        
-                # Detailed classification report for best model
-                print("\n" + "="*80)
-                print(f"DETAILED CLASSIFICATION REPORT - {best_model_name}")
-                print("="*80)
-                y_test_pred = best_model_pipeline.predict(X_test)
-                print(classification_report(y_test, y_test_pred, 
-                                        target_names=label_encoder.classes_))
-            
+                # ── Step 5: Classification report ─────────────────────
+                print("\n" + "=" * 80)
+                print(f"CLASSIFICATION REPORT — {best_model_name}")
+                print("=" * 80)
+                y_test_pred = best_model.predict(X_test_transformed)
+                print(classification_report(
+                    y_test, y_test_pred,
+                    target_names=label_encoder.classes_
+                ))
+
+                # ── Step 6: SHAP explainability ───────────────────────
+                # Background = original X_train_transformed (no synthetic rows)
+                shap_explainer = SHAPExplainer(
+                    model=best_model,
+                    X_train_transformed=X_train_transformed,
+                    feature_names=feature_names
+                )
+
+                # Global explanation — overall feature importance
+                global_contrib = shap_explainer.global_explanation(
+                    X_test_transformed=X_test_transformed,
+                    save_dir=self.model_trainer_config.global_shap_dir,
+                    max_samples = 500)
+
+                # Local explanation — single prediction breakdown (first test record)
+                local_contrib = shap_explainer.local_explanation(
+                    single_record=X_test_transformed[0:1],
+                    save_path = self.model_trainer_config.local_shap_dir)
+                
+                logging.info(f"Local SHAP (first test record): {local_contrib}")
+
+                # Save SHAP explainer for inference-time use
+                os.makedirs(os.path.dirname(self.model_trainer_config.shap_explainer_dir), exist_ok=True)               
+                joblib.dump(shap_explainer, self.model_trainer_config.shap_explainer_dir)
+                logging.info("SHAP explainer saved.")
+
         except Exception as e:
             raise CustomException(e, sys)

@@ -19,7 +19,7 @@ if __name__=="__main__":
         validation_report_file_path = data_validation.initiate_data_validation()
         
         #========================== Feature engg and transformation pipeline creation ====================================
-        data_transformation = DataTransformation()
+        # data_transformation = DataTransformation()
 
         #========================== Hyperparameter tuning and finding best model best pipeline ===========================
         model_trainer = ModelTrainer()

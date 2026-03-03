@@ -50,11 +50,21 @@ class DataValidationConfig:
 @dataclass
 class DataTransformationConfig:
     data_transformation_dir: str = os.path.join(training_pipeline_config.artifact_dir, "data_transformation")
+    X_train_transformed_dir: str = os.path.join(data_transformation_dir, "X_train_transformed.npy")
+    X_test_transformed_dir: str = os.path.join(data_transformation_dir, "X_test_transformed.npy")
+    feature_names_dir: str = os.path.join(data_transformation_dir, "Feature_names.json")
+    preprocessing_pipeline_dir: str = os.path.join(data_transformation_dir, "preprocessing_pipeline.pkl")
 
 
 @dataclass
 class ModelTrainerConfig:
-    model_comparison_results_dir = os.path.join(training_pipeline_config.artifact_dir, "model_comparison_results.csv")
-    best_pipeline_dir = os.path.join(training_pipeline_config.artifact_dir, "best_pipeline_{}.pkl")
-    label_encoder_dir = os.path.join(training_pipeline_config.artifact_dir, "label_encoder.pkl")
+    model_trainer_dir = os.path.join(training_pipeline_config.artifact_dir, "model_trainer")
+    model_comparison_results_dir = os.path.join(model_trainer_dir, "model_comparison_results.csv")
+    best_pipeline_dir = os.path.join(model_trainer_dir, "{}_model.pkl")
+    label_encoder_dir = os.path.join(model_trainer_dir, "label_encoder.pkl")
+
+    shap_dir = os.path.join(model_trainer_dir, "shap")
+    global_shap_dir = os.path.join(shap_dir, "global_shap")
+    local_shap_dir = os.path.join(shap_dir, "local_shap")
+    shap_explainer_dir = os.path.join(shap_dir, "shap_explainer.pkl")
     
